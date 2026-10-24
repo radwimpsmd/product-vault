@@ -55,12 +55,21 @@ label{font-size:12px;font-weight:700;color:var(--sub)}
 .toast{position:fixed;left:12px;right:12px;top:calc(12px + env(safe-area-inset-top,0px));z-index:20;background:var(--dg);color:#fff;padding:12px;border-radius:6px}
 .hist{font-size:13px;color:var(--sub);padding:4px 0;border-bottom:1px solid var(--ln)}
 a{color:var(--ac);word-break:break-all}
+
+:root{--ok:#0f766e}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--ok:#5ad1b4}}
+:root[data-theme="dark"]{--ok:#5ad1b4}
+.tg.o{color:var(--ok)}
+.g.d{color:var(--dg)}
+.fi{padding:8px 0;border-bottom:1px solid var(--ln)}
+a.b{display:flex;align-items:center;justify-content:center;text-decoration:none;margin-top:8px}
+.b.o{background:none;color:var(--ac);border:1px solid var(--ac)}
 </style></head><body><div id="app"></div>
 <script>
 "use strict";
 const K="pv_vault_v1",root=document.getElementById("app"),NS="http://www.w3.org/2000/svg";
-const STATUS=["下書き","レビュー待ち","承認済み","廃止"],LEVEL=["社内限定","社外秘"];
-let db=null,key=null,salt=null,q="",fl="",fs="",idle=null,hid=null,fails=0,armed=false;
+const MAXF=20*1024*1024;
+let db=null,key=null,salt=null,q="",fs="",idle=null,hid=null,fails=0,armed=false;
 const enc=new TextEncoder(),dec=new TextDecoder(),sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const b64=u=>{let s="";for(let i=0;i<u.length;i+=8192)s+=String.fromCharCode(...u.subarray(i,i+8192));return btoa(s)};
 const ub64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
@@ -69,14 +78,20 @@ async function derive(p,s){const k=await crypto.subtle.importKey("raw",enc.encod
 async function seal(){const iv=crypto.getRandomValues(new Uint8Array(12));const ct=new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv},key,enc.encode(JSON.stringify(db))));return JSON.stringify({v:1,s:b64(salt),i:b64(iv),c:b64(ct)})}
 async function unseal(blob,p){const o=JSON.parse(blob),s=ub64(o.s),k=await derive(p,s);const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:ub64(o.i)},k,ub64(o.c));return{k,s,d:JSON.parse(dec.decode(pt))}}
 async function persist(){try{localStorage.setItem(K,await seal())}catch{toast("保存に失敗しました(ブラウザの保存が無効か容量不足)")}}
+const norm=()=>{db.products.forEach(p=>{if(!Array.isArray(p.docs))p.docs=[]})};
+
+// 資料ファイル(暗号化して IndexedDB に保存)
+const idb=()=>new Promise((res,rej)=>{const r=indexedDB.open("pv_files",1);r.onupgradeneeded=()=>r.result.createObjectStore("f");r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});
+async function idbOp(mode,fn){const d=await idb();return new Promise((res,rej)=>{const t=d.transaction("f",mode),rq=fn(t.objectStore("f"));t.oncomplete=()=>{d.close();res(rq&&rq.result)};t.onerror=t.onabort=()=>rej(t.error)})}
+const fPut=(id,v)=>idbOp("readwrite",s=>s.put(v,id)),fGet=id=>idbOp("readonly",s=>s.get(id)),fDel=id=>idbOp("readwrite",s=>s.delete(id)),fClear=()=>idbOp("readwrite",s=>s.clear());
+async function encFile(f){const iv=crypto.getRandomValues(new Uint8Array(12));return{iv,ct:await crypto.subtle.encrypt({name:"AES-GCM",iv},key,await f.arrayBuffer())}}
+const fmtSize=n=>n>=1048576?(n/1048576).toFixed(1)+" MB":Math.max(1,Math.round(n/1024))+" KB";
 
 function h(tag,props={},...kids){const e=document.createElement(tag);for(const[k,v]of Object.entries(props)){if(k.startsWith("on"))e.addEventListener(k.slice(2),v);else if(k==="class")e.className=v;else if(v!==false&&v!=null)e.setAttribute(k,v===true?"":v)}e.append(...kids.flat().filter(x=>x!=null&&x!==false));return e}
 function icon(ds){const s=document.createElementNS(NS,"svg");s.setAttribute("viewBox","0 0 24 24");s.setAttribute("aria-hidden","true");for(const d of ds){const p=document.createElementNS(NS,"path");p.setAttribute("d",d);s.append(p)}return s}
-function toast(m){const t=h("div",{class:"toast",role:"alert"},m);document.body.append(t);setTimeout(()=>t.remove(),3500)}
-function sheet(title,build){const close=()=>ov.remove();const ov=h("div",{class:"ov",onclick:e=>{if(e.target===ov)close()}},h("section",{class:"sh",role:"dialog","aria-modal":"true"},h("div",{class:"rw"},h("h2",{style:"font-size:17px"},title),h("button",{class:"g",onclick:close},"閉じる")),build(close)));document.body.append(ov)}
-const fmt=t=>new Date(t).toLocaleString("ja-JP",{dateStyle:"short",timeStyle:"short"});
-const docsOf=p=>(p.docs||"").split("\n").map(l=>l.trim()).filter(Boolean).map(l=>{const[name,type,ver,loc]=l.split("|").map(s=>s.trim());return{name:name||"",type:type||"",ver:ver||"",loc:loc||""}});
-const isUrl=s=>/^https?:\/\/\S+$/i.test(s);
+function toast(m,ok){const t=h("div",{class:"toast",role:"alert",style:ok?"background:#2a8a4a":""},m);document.body.append(t);setTimeout(()=>t.remove(),3500)}
+function sheet(title,build,onClose){const close=()=>{ov.remove();onClose&&onClose()};const ov=h("div",{class:"ov",onclick:e=>{if(e.target===ov)close()}},h("section",{class:"sh",role:"dialog","aria-modal":"true"},h("div",{class:"rw"},h("h2",{style:"font-size:17px"},title),h("button",{class:"g",onclick:close},"閉じる")),build(close)));document.body.append(ov)}
+const isRead=p=>!!p.readAt;
 
 function arm(){if(armed)return;armed=true;const bump=()=>{if(db){clearTimeout(idle);idle=setTimeout(lock,300000)}};["click","keydown","touchstart"].forEach(e=>document.addEventListener(e,bump,{passive:true}));document.addEventListener("visibilitychange",()=>{clearTimeout(hid);if(document.hidden&&db)hid=setTimeout(lock,60000)});bump()}
 function lock(){db=null;key=null;salt=null;document.querySelectorAll(".ov").forEach(o=>o.remove());render()}
@@ -95,7 +110,7 @@ function lockView(){
         if(p1.value!==p2.value){err.textContent="確認用が一致しません";return}
         salt=crypto.getRandomValues(new Uint8Array(16));key=await derive(p1.value,salt);db={products:[]};await persist();
       }else{
-        try{const r=await unseal(blob,p1.value);key=r.k;salt=r.s;db=r.d;fails=0}
+        try{const r=await unseal(blob,p1.value);key=r.k;salt=r.s;db=r.d;norm();fails=0}
         catch{fails++;const w=Math.min(30,2**fails);p1.value="";err.textContent=`パスコードが違います(${w}秒お待ちください)`;await sleep(w*1000);err.textContent="パスコードが違います";return}
       }
       arm();render();
@@ -109,20 +124,21 @@ function lockView(){
 }
 
 function home(){
-  const P=db.products;
+  const P=db.products,nRead=P.filter(isRead).length;
   const stat=(bg,fg,ds,label,n)=>h("div",{class:"k st"},h("div",{class:"ic",style:`background:${bg};color:${fg}`},icon(ds)),h("div",{},h("p",{class:"lb"},label),h("p",{class:"n m"},String(n),h("small",{}," 件"))));
   const list=h("div",{}),count=h("p",{class:"sub",style:"margin-bottom:10px"});
-  const sel=(val,all,opts,set)=>{const s=h("select",{class:"f","aria-label":all,style:"margin:0"},h("option",{value:""},all),...opts.map(o=>h("option",{value:o},o)));s.value=val;s.addEventListener("change",()=>{set(s.value);paint()});return s};
+  const sel=h("select",{class:"f","aria-label":"状態"},h("option",{value:""},"状態:すべて"),h("option",{value:"未読"},"未読"),h("option",{value:"既読済み"},"既読済み"));
+  sel.value=fs;sel.addEventListener("change",()=>{fs=sel.value;paint()});
   function paint(){
     const t=q.toLowerCase();
-    const items=P.filter(p=>(!fl||p.level===fl)&&(!fs||p.status===fs)&&(!t||[p.name,p.model,p.category,p.owner,p.summary].join("\n").toLowerCase().includes(t))).sort((a,b)=>b.updatedAt-a.updatedAt);
+    const items=P.filter(p=>(!fs||(fs==="既読済み")===isRead(p))&&(!t||[p.name,p.model].join("\n").toLowerCase().includes(t))).sort((a,b)=>b.updatedAt-a.updatedAt);
     count.textContent=`${items.length}件の表示 / 全${P.length}件`;list.textContent="";
     if(!items.length)list.append(h("p",{class:"sub",style:"text-align:center;padding:28px 0;border-top:1px solid var(--ln)"},P.length?"条件に一致する製品はありません":"まだ製品がありません。右下の「+」から追加してください"));
     for(const p of items)list.append(h("button",{class:"row",onclick:()=>detail(p.id)},
-      h("div",{},h("p",{style:"font-weight:700"},p.name),h("p",{class:"sub"},[p.model,p.category,p.owner].filter(Boolean).join(" ・ "))),
-      h("div",{style:"text-align:right"},h("span",{class:"tg "+(p.level==="社外秘"?"r":"i")},p.level),h("span",{class:"tg "+(p.status==="レビュー待ち"?"a":"")},p.status))));
+      h("div",{},h("p",{style:"font-weight:700"},p.name),h("p",{class:"sub"},[p.model,`資料${p.docs.length}件`].filter(Boolean).join(" ・ "))),
+      h("span",{class:"tg "+(isRead(p)?"o":"a")},isRead(p)?"既読済み":"未読")));
   }
-  const search=h("input",{class:"f",type:"search",placeholder:"製品名・型番・担当で検索","aria-label":"検索",value:q});
+  const search=h("input",{class:"f",type:"search",placeholder:"製品名・型番で検索","aria-label":"検索",value:q});
   search.addEventListener("input",()=>{q=search.value;paint()});
   const el=h("main",{},
     h("div",{class:"bar"},h("button",{class:"g",onclick:backup},"バックアップ"),h("button",{class:"g",onclick:lock},"ロック")),
@@ -130,61 +146,115 @@ function home(){
     h("p",{class:"sub"},"製品情報と関連資料を、一つの安全な場所で管理します。"),
     h("div",{class:"grid"},
       stat("#e8eefb","#2f4fa8",["M3 4h18v5H3zM5 9v10h14V9M10 13h4"],"登録製品",P.length),
-      stat("#fdf0dc","#b45309",["M12 3a9 9 0 1 0 0 18a9 9 0 0 0 0-18zM12 7v5l3 2"],"レビュー待ち",P.filter(p=>p.status==="レビュー待ち").length),
-      stat("#def5ee","#0f766e",["M5 11h14v10H5zM8 11V8a4 4 0 0 1 8 0v3"],"機密指定",P.filter(p=>p.level==="社外秘").length),
-      stat("#e8ebf2","#475569",["M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 14l2 2 4-4"],"保管資料",P.reduce((a,p)=>a+docsOf(p).length,0))),
-    h("section",{class:"k"},h("div",{style:"padding:14px"},h("h2",{style:"font-size:17px"},"製品一覧"),count,search,
-      h("div",{style:"display:grid;grid-template-columns:1fr 1fr;gap:8px"},sel(fl,"機密:すべて",LEVEL,v=>fl=v),sel(fs,"状態:すべて",STATUS,v=>fs=v))),list),
+      stat("#def5ee","#0f766e",["M12 3a9 9 0 1 0 0 18a9 9 0 0 0 0-18zM8 12l3 3 5-6"],"既読済み",nRead),
+      stat("#fdf0dc","#b45309",["M12 3a9 9 0 1 0 0 18a9 9 0 0 0 0-18zM12 7v5l3 2"],"未読",P.length-nRead),
+      stat("#e8ebf2","#475569",["M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 14l2 2 4-4"],"保管資料",P.reduce((a,p)=>a+p.docs.length,0))),
+    h("section",{class:"k"},h("div",{style:"padding:14px"},h("h2",{style:"font-size:17px"},"製品一覧"),count,search,sel),list),
     h("button",{class:"fab","aria-label":"製品を追加",onclick:()=>form(null)},"+"));
-  setTimeout(paint,0);paint();return el;
+  paint();return el;
 }
 
-function fld(label,val){return val?h("div",{class:"fd"},h("p",{class:"sub"},label),h("p",{},val)):null}
+// 資料を開く(開いた時点で既読済みにする)
+async function openDoc(p,d,onRead){
+  let url;
+  try{
+    const rec=await fGet(d.id);if(!rec)throw 0;
+    const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:rec.iv},key,rec.ct);
+    const blob=new Blob([pt],{type:d.type||"application/octet-stream"});
+    url=URL.createObjectURL(blob);
+    const file=new File([blob],d.name,{type:blob.type});
+    if(!p.readAt){p.readAt=Date.now();await persist();render();onRead&&onRead()}
+    sheet(d.name,()=>h("div",{},
+      d.type&&d.type.startsWith("image/")&&h("img",{src:url,alt:d.name,style:"width:100%;margin:12px 0;border-radius:4px"}),
+      h("p",{class:"sub",style:"margin:10px 0"},fmtSize(d.size)),
+      h("a",{class:"b",href:url,target:"_blank",rel:"noopener"},"別画面で開く"),
+      h("button",{class:"b o",style:"margin-top:8px",onclick:()=>{
+        if(navigator.canShare&&navigator.canShare({files:[file]}))navigator.share({files:[file],title:d.name}).catch(()=>{});
+        else toast("この端末では共有できません。「別画面で開く」を使ってください")}},"共有・保存")),
+      ()=>setTimeout(()=>URL.revokeObjectURL(url),60000));
+  }catch{toast("資料を開けませんでした")}
+}
+
 function detail(id){
   const p=db.products.find(x=>x.id===id);if(!p)return;
+  const tag=h("span",{class:"tg",style:"margin:0"});
+  const hint=h("p",{class:"sub",style:"margin-top:4px"}),rl=h("p",{class:"sub",style:"margin:10px 0"});
+  const upd=()=>{tag.textContent=isRead(p)?"既読済み":"未読";tag.className="tg "+(isRead(p)?"o":"a");hint.textContent="資料"+(isRead(p)?"":"(開くと既読済みになります)");rl.textContent=isRead(p)?"既読: "+new Date(p.readAt).toLocaleString("ja-JP",{dateStyle:"short",timeStyle:"short"}):""};upd();
   sheet(p.name,close=>h("div",{},
-    h("div",{style:"margin:8px 0"},h("span",{class:"tg "+(p.level==="社外秘"?"r":"i"),style:"margin:0"},p.level),h("span",{class:"tg"},p.status),h("span",{class:"tg"},"版 "+(p.version||"-"))),
-    fld("型番",p.model),fld("カテゴリ",p.category),fld("担当",p.owner),fld("概要",p.summary),fld("主な仕様",p.specs),fld("使用条件・注意事項・備考",p.notes),
-    docsOf(p).length&&h("div",{class:"fd"},h("p",{class:"sub"},"関連資料"),...docsOf(p).map(d=>h("p",{style:"margin-bottom:4px"},[d.name,d.type,d.ver&&"v"+d.ver].filter(Boolean).join(" / "),d.loc&&" — ",d.loc&&(isUrl(d.loc)?h("a",{href:d.loc,target:"_blank",rel:"noopener noreferrer"},d.loc):d.loc)))),
-    h("div",{class:"fd"},h("p",{class:"sub"},"変更履歴"),...(p.history||[]).slice().reverse().map(x=>h("div",{class:"hist"},`${fmt(x.at)} ・ 版${x.ver||"-"} ・ ${x.note}`))),
-    h("button",{class:"b",style:"margin-bottom:8px",onclick:()=>{close();form(p)}},"編集"),
-    h("button",{class:"b d",onclick:async()=>{if(!confirm("この製品を削除しますか?(元に戻せません)"))return;db.products=db.products.filter(x=>x!==p);await persist();close();render()}},"削除")));
+    h("div",{style:"margin:8px 0"},tag),
+    p.model&&h("div",{class:"fd"},h("p",{class:"sub"},"型番"),h("p",{},p.model)),
+    hint,
+    ...(p.docs.length?p.docs.map(d=>h("button",{class:"row",onclick:()=>openDoc(p,d,upd)},
+      h("div",{style:"min-width:0"},h("p",{style:"font-weight:700;word-break:break-all"},d.name),h("p",{class:"sub"},fmtSize(d.size))),h("span",{class:"tg i"},"開く"))):[h("p",{class:"sub",style:"padding:12px 0"},"資料はまだありません。「編集」から追加できます")]),
+    rl,
+    h("button",{class:"b",style:"margin-top:12px",onclick:()=>{close();form(p)}},"編集"),
+    h("button",{class:"b d",style:"margin-top:8px",onclick:async()=>{
+      if(!confirm("この製品と資料を削除しますか?(元に戻せません)"))return;
+      try{for(const d of p.docs)await fDel(d.id)}catch{}
+      db.products=db.products.filter(x=>x!==p);await persist();close();render()}},"削除")));
 }
 
 function form(p){
-  const v=p||{level:"社内限定",status:"下書き",version:"1.0"};
-  const mk=(tag,label,val,props={})=>{const el=h(tag,{class:"f",...props});el.value=val||"";return[h("label",{},label),el,el]};
-  const[l1,name]=mk("input","製品名(必須)",v.name,{maxlength:"100",required:true});
-  const[l2,model]=mk("input","型番",v.model,{maxlength:"60"});
-  const[l3,cat]=mk("input","カテゴリ",v.category,{maxlength:"40",list:"cats"});
-  const dl=h("datalist",{id:"cats"},...[...new Set(db.products.map(x=>x.category).filter(Boolean))].map(c=>h("option",{value:c})));
-  const[l4,level]=mk("select","機密区分",v.level);level.append(...LEVEL.map(o=>h("option",{value:o},o)));level.value=v.level;
-  const[l5,status]=mk("select","状態",v.status);status.append(...STATUS.map(o=>h("option",{value:o},o)));status.value=v.status;
-  const[l6,owner]=mk("input","担当",v.owner,{maxlength:"40"});
-  const[l7,ver]=mk("input","版数",v.version,{maxlength:"20"});
-  const[l8,sum]=mk("textarea","概要(500字以内)",v.summary,{maxlength:"500",rows:"3"});
-  const[l9,specs]=mk("textarea","主な仕様",v.specs,{maxlength:"3000",rows:"5"});
-  const[l10,notes]=mk("textarea","使用条件・注意事項・備考",v.notes,{maxlength:"2000",rows:"4"});
-  const[l11,docs]=mk("textarea","関連資料(1行1件: 資料名 | 種別 | 版 | 保管場所またはURL)",v.docs,{maxlength:"3000",rows:"4",placeholder:"仕様書 | 仕様書 | 1.0 | https://..."});
-  const[l12,chg]=mk("input",p?"変更内容(履歴に記録)":"履歴メモ","",{maxlength:"100",placeholder:p?"例: 仕様を更新":"新規作成"});
-  sheet(p?"製品を編集":"製品を追加",close=>h("form",{onsubmit:async e=>{
-    e.preventDefault();const now=Date.now(),o=p||{id:crypto.randomUUID(),createdAt:now,history:[]};
-    Object.assign(o,{name:name.value.trim(),model:model.value.trim(),category:cat.value.trim(),level:level.value,status:status.value,owner:owner.value.trim(),version:ver.value.trim(),summary:sum.value.trim(),specs:specs.value.trim(),notes:notes.value.trim(),docs:docs.value.trim(),updatedAt:now});
-    o.history.push({at:now,ver:o.version,note:chg.value.trim()||(p?"更新":"新規作成")});
-    if(!p)db.products.push(o);await persist();close();render();
-  }},h("div",{style:"height:8px"}),dl,l1,name,l2,model,l3,cat,l4,level,l5,status,l6,owner,l7,ver,l8,sum,l9,specs,l10,notes,l11,docs,l12,chg,h("button",{class:"b",type:"submit"},"保存")));
+  const saved=p?[...p.docs]:[],removed=[];let pending=[];
+  const name=h("input",{class:"f",maxlength:"100",required:true}),model=h("input",{class:"f",maxlength:"60"});
+  name.value=p?p.name:"";model.value=p?p.model||"":"";
+  const input=h("input",{type:"file",multiple:true,style:"display:none"}),fl=h("div",{style:"margin-bottom:12px"});
+  const row=(f,btns)=>h("div",{class:"rw fi"},h("div",{style:"min-width:0"},h("p",{style:"word-break:break-all"},f.name),h("p",{class:"sub"},fmtSize(f.size))),h("span",{style:"white-space:nowrap"},btns));
+  function paintF(){
+    fl.textContent="";
+    for(const d of saved)fl.append(row(d,[p&&h("button",{type:"button",class:"g",onclick:()=>openDoc(p,d)},"開く"),h("button",{type:"button",class:"g d",onclick:()=>{saved.splice(saved.indexOf(d),1);removed.push(d.id);paintF()}},"削除")]));
+    for(const f of pending)fl.append(row(f,[h("button",{type:"button",class:"g d",onclick:()=>{pending=pending.filter(x=>x!==f);paintF()}},"削除")]));
+  }
+  input.addEventListener("change",()=>{for(const f of input.files){if(f.size>MAXF){toast(`「${f.name}」は20MBを超えるため追加できません`);continue}pending.push(f)}input.value="";paintF()});
+  const btn=h("button",{class:"b",type:"submit"},"保存");
+  sheet(p?"製品を編集":"製品を登録",close=>h("form",{onsubmit:async e=>{
+    e.preventDefault();btn.disabled=true;btn.textContent="保存中…";
+    try{
+      const now=Date.now(),o=p||{id:crypto.randomUUID(),createdAt:now,docs:[]},docs=[...saved];
+      for(const f of pending){const{iv,ct}=await encFile(f),id=crypto.randomUUID();await fPut(id,{iv,ct});docs.push({id,name:f.name,type:f.type||"",size:f.size,at:now})}
+      for(const id of removed)await fDel(id);
+      Object.assign(o,{name:name.value.trim(),model:model.value.trim(),docs,updatedAt:now});
+      if(!p)db.products.push(o);
+      await persist();close();render();
+    }catch{toast("保存に失敗しました(端末の保存容量を確認してください)");btn.disabled=false;btn.textContent="保存"}
+  }},h("div",{style:"height:8px"}),h("label",{},"製品名(必須)"),name,h("label",{},"型番"),model,
+    h("label",{},"資料"),fl,input,h("button",{type:"button",class:"b o",style:"margin:0 0 16px",onclick:()=>input.click()},"資料をアップロード"),btn));
 }
 
 function backup(){
-  const cur=h("textarea",{class:"f",rows:"4",readonly:true});cur.value=rd()||"";
-  const inp=h("textarea",{class:"f",rows:"4",placeholder:"バックアップ文字列を貼り付け"}),pw=h("input",{class:"f",type:"password",placeholder:"そのバックアップのパスコード",autocomplete:"off"});
-  sheet("バックアップ・復元",close=>h("div",{},
-    h("p",{class:"sub",style:"margin:10px 0"},"下の文字列は暗号化済みです。メモアプリなど安全な場所に保管してください(パスコードがないと開けません)。"),
-    cur,h("button",{class:"b",style:"margin-bottom:18px",onclick:async()=>{try{await navigator.clipboard.writeText(cur.value);toast_ok("コピーしました")}catch{cur.select();toast("長押しでコピーしてください")}}},"コピー"),
-    h("p",{class:"sub"},"復元(現在のデータは置き換わります)"),inp,pw,
-    h("button",{class:"b d",onclick:async()=>{if(!inp.value.trim())return;if(!confirm("現在のデータを置き換えて復元しますか?"))return;try{const r=await unseal(inp.value.trim(),pw.value);key=r.k;salt=r.s;db=r.d;localStorage.setItem(K,inp.value.trim());close();render();toast_ok("復元しました")}catch{toast("復元に失敗しました(文字列かパスコードが違います)")}}},"復元する")));
+  let ready=null;
+  const out=h("div",{}),pick=h("input",{type:"file",class:"f",accept:".json,application/json"}),pw=h("input",{class:"f",type:"password",placeholder:"そのバックアップのパスコード",autocomplete:"off"});
+  const mk=h("button",{class:"b",onclick:async()=>{
+    mk.disabled=true;mk.textContent="作成中…";out.textContent="";
+    try{
+      const files=[];
+      for(const p of db.products)for(const d of p.docs){const r=await fGet(d.id);if(r)files.push({id:d.id,i:b64(r.iv),c:b64(new Uint8Array(r.ct))})}
+      const text=JSON.stringify({v:2,meta:await seal(),files});
+      const name=`製品保管庫-${new Date().toISOString().slice(0,10)}.json`;
+      ready=new File([text],name,{type:"application/json"});
+      const url=URL.createObjectURL(ready);
+      out.append(h("p",{class:"sub",style:"margin:8px 0"},`${name}(${fmtSize(ready.size)})を作成しました`),
+        h("button",{class:"b",onclick:()=>{if(navigator.canShare&&navigator.canShare({files:[ready]}))navigator.share({files:[ready]}).catch(()=>{});else toast("共有できません。下の「ダウンロード」を使ってください")}},"保存・共有(「ファイルに保存」を選択)"),
+        h("a",{class:"b o",href:url,download:name},"ダウンロード"));
+    }catch{toast("バックアップの作成に失敗しました")}
+    mk.disabled=false;mk.textContent="バックアップを作成";
+  }},"バックアップを作成");
+  sheet("バックアップ・復元",()=>h("div",{},
+    h("p",{class:"sub",style:"margin:10px 0"},"製品情報と資料をまとめた、暗号化済みのファイルを作ります。パスコードがないと開けません。"),
+    mk,out,
+    h("p",{class:"sub",style:"margin:20px 0 6px"},"復元(現在のデータは置き換わります)"),pick,pw,
+    h("button",{class:"b d",onclick:async()=>{
+      const f=pick.files[0];if(!f)return toast("バックアップファイルを選んでください");
+      if(!confirm("現在のデータを置き換えて復元しますか?"))return;
+      try{
+        const o=JSON.parse(await f.text()),r=await unseal(o.meta,pw.value);
+        await fClear();for(const x of o.files||[])await fPut(x.id,{iv:ub64(x.i),ct:ub64(x.c).buffer});
+        key=r.k;salt=r.s;db=r.d;norm();localStorage.setItem(K,o.meta);
+        document.querySelectorAll(".ov").forEach(v=>v.remove());render();toast("復元しました",true);
+      }catch{toast("復元に失敗しました(ファイルかパスコードが違います)")}
+    }},"復元する")));
 }
-function toast_ok(m){const t=h("div",{class:"toast",style:"background:#2a8a4a"},m);document.body.append(t);setTimeout(()=>t.remove(),2500)}
+
 if("serviceWorker"in navigator)addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));
 render();
 </script></body></html>
