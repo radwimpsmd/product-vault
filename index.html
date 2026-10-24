@@ -64,26 +64,32 @@ a{color:var(--ac);word-break:break-all}
 .fi{padding:8px 0;border-bottom:1px solid var(--ln)}
 a.b{display:flex;align-items:center;justify-content:center;text-decoration:none;margin-top:8px}
 .b.o{background:none;color:var(--ac);border:1px solid var(--ac)}
+.st.on{border-color:var(--ac);box-shadow:0 0 0 1px var(--ac)}
+button.st{width:100%;text-align:left;cursor:pointer}
+.ck{display:flex;gap:10px;align-items:center;min-height:44px}
+.ck input{width:22px;height:22px;flex:none}
+.card{padding:12px;margin-bottom:10px}
 </style></head><body><div id="app"></div>
 <script>
 "use strict";
 const K="pv_vault_v1",root=document.getElementById("app"),NS="http://www.w3.org/2000/svg";
 const MAXF=20*1024*1024;
-let db=null,key=null,salt=null,q="",fs="",idle=null,hid=null,fails=0,armed=false;
+let db=null,key=null,salt=null,q="",fs="",idle=null,hid=null,fails=0,armed=false,who="owner",view=null,vread={};
 const enc=new TextEncoder(),dec=new TextDecoder(),sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const b64=u=>{let s="";for(let i=0;i<u.length;i+=8192)s+=String.fromCharCode(...u.subarray(i,i+8192));return btoa(s)};
 const ub64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
 const rd=()=>{try{return localStorage.getItem(K)}catch{return null}};
-async function derive(p,s){const k=await crypto.subtle.importKey("raw",enc.encode(p),"PBKDF2",false,["deriveKey"]);return crypto.subtle.deriveKey({name:"PBKDF2",salt:s,iterations:250000,hash:"SHA-256"},k,{name:"AES-GCM",length:256},false,["encrypt","decrypt"])}
+async function derive(p,s,it=250000){const k=await crypto.subtle.importKey("raw",enc.encode(p),"PBKDF2",false,["deriveKey"]);return crypto.subtle.deriveKey({name:"PBKDF2",salt:s,iterations:it,hash:"SHA-256"},k,{name:"AES-GCM",length:256},false,["encrypt","decrypt"])}
 async function seal(){const iv=crypto.getRandomValues(new Uint8Array(12));const ct=new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv},key,enc.encode(JSON.stringify(db))));return JSON.stringify({v:1,s:b64(salt),i:b64(iv),c:b64(ct)})}
 async function unseal(blob,p){const o=JSON.parse(blob),s=ub64(o.s),k=await derive(p,s);const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:ub64(o.i)},k,ub64(o.c));return{k,s,d:JSON.parse(dec.decode(pt))}}
 async function persist(){try{localStorage.setItem(K,await seal())}catch{toast("保存に失敗しました(ブラウザの保存が無効か容量不足)")}}
 const norm=()=>{db.products.forEach(p=>{if(!Array.isArray(p.docs))p.docs=[]})};
 
 // 資料ファイル(暗号化して IndexedDB に保存)
-const idb=()=>new Promise((res,rej)=>{const r=indexedDB.open("pv_files",1);r.onupgradeneeded=()=>r.result.createObjectStore("f");r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});
-async function idbOp(mode,fn){const d=await idb();return new Promise((res,rej)=>{const t=d.transaction("f",mode),rq=fn(t.objectStore("f"));t.oncomplete=()=>{d.close();res(rq&&rq.result)};t.onerror=t.onabort=()=>rej(t.error)})}
+const idb=n=>new Promise((res,rej)=>{const r=indexedDB.open(n,1);r.onupgradeneeded=()=>r.result.createObjectStore("f");r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});
+async function idbOp(mode,fn,n="pv_files"){const d=await idb(n);return new Promise((res,rej)=>{const t=d.transaction("f",mode),rq=fn(t.objectStore("f"));t.oncomplete=()=>{d.close();res(rq&&rq.result)};t.onerror=t.onabort=()=>rej(t.error)})}
 const fPut=(id,v)=>idbOp("readwrite",s=>s.put(v,id)),fGet=id=>idbOp("readonly",s=>s.get(id)),fDel=id=>idbOp("readwrite",s=>s.delete(id)),fClear=()=>idbOp("readwrite",s=>s.clear());
+const sPut=(id,v)=>idbOp("readwrite",s=>s.put(v,id),"pv_share"),sGet=id=>idbOp("readonly",s=>s.get(id),"pv_share"),sClear=()=>idbOp("readwrite",s=>s.clear(),"pv_share");
 async function encFile(f){const iv=crypto.getRandomValues(new Uint8Array(12));return{iv,ct:await crypto.subtle.encrypt({name:"AES-GCM",iv},key,await f.arrayBuffer())}}
 const fmtSize=n=>n>=1048576?(n/1048576).toFixed(1)+" MB":Math.max(1,Math.round(n/1024))+" KB";
 
@@ -91,11 +97,12 @@ function h(tag,props={},...kids){const e=document.createElement(tag);for(const[k
 function icon(ds){const s=document.createElementNS(NS,"svg");s.setAttribute("viewBox","0 0 24 24");s.setAttribute("aria-hidden","true");for(const d of ds){const p=document.createElementNS(NS,"path");p.setAttribute("d",d);s.append(p)}return s}
 function toast(m,ok){const t=h("div",{class:"toast",role:"alert",style:ok?"background:#2a8a4a":""},m);document.body.append(t);setTimeout(()=>t.remove(),3500)}
 function sheet(title,build,onClose){const close=()=>{ov.remove();onClose&&onClose()};const ov=h("div",{class:"ov",onclick:e=>{if(e.target===ov)close()}},h("section",{class:"sh",role:"dialog","aria-modal":"true"},h("div",{class:"rw"},h("h2",{style:"font-size:17px"},title),h("button",{class:"g",onclick:close},"閉じる")),build(close)));document.body.append(ov)}
-const isRead=p=>!!p.readAt;
+const isRead=p=>view?!!vread[p.id]:!!p.readAt;
+async function markRead(p){if(view){vread[p.id]=Date.now();try{localStorage.setItem("pv_vread",JSON.stringify(vread))}catch{}}else{p.readAt=Date.now();await persist()}}
 
-function arm(){if(armed)return;armed=true;const bump=()=>{if(db){clearTimeout(idle);idle=setTimeout(lock,300000)}};["click","keydown","touchstart"].forEach(e=>document.addEventListener(e,bump,{passive:true}));document.addEventListener("visibilitychange",()=>{clearTimeout(hid);if(document.hidden&&db)hid=setTimeout(lock,60000)});bump()}
-function lock(){db=null;key=null;salt=null;document.querySelectorAll(".ov").forEach(o=>o.remove());render()}
-function render(){root.textContent="";root.append(db?home():lockView())}
+function arm(){if(armed)return;armed=true;const bump=()=>{if(db||view){clearTimeout(idle);idle=setTimeout(lock,300000)}};["click","keydown","touchstart"].forEach(e=>document.addEventListener(e,bump,{passive:true}));document.addEventListener("visibilitychange",()=>{clearTimeout(hid);if(document.hidden&&(db||view))hid=setTimeout(lock,60000)});bump()}
+function lock(){db=null;key=null;salt=null;view=null;document.querySelectorAll(".ov").forEach(o=>o.remove());render()}
+function render(){root.textContent="";root.append(db||view?home():who==="viewer"?viewerLock():lockView())}
 
 function lockView(){
   const blob=rd(),first=!blob;
@@ -120,75 +127,84 @@ function lockView(){
     h("p",{class:"eb m"},"INTERNAL ARCHIVE"),h("h1",{style:"font-size:24px;margin:2px 0 4px"},"製品保管庫"),
     h("p",{class:"sub",style:"margin-bottom:14px"},first?"最初にパスコードを設定します。データはこの端末のブラウザ内で暗号化して保存され、パスコードを忘れると復元できません。":"パスコードを入力してください"),
     p1,p2,err,btn);
-  return h("main",{class:"ctr"},f);
+  return h("main",{class:"ctr"},h("div",{style:"width:100%;max-width:380px"},f,h("button",{class:"g",style:"width:100%;margin-top:8px",onclick:()=>{who="viewer";render()}},"閲覧者として開く(配信を受け取った方)")));
 }
 
 function home(){
-  const P=db.products,nRead=P.filter(isRead).length;
-  const stat=(bg,fg,ds,label,n)=>h("div",{class:"k st"},h("div",{class:"ic",style:`background:${bg};color:${fg}`},icon(ds)),h("div",{},h("p",{class:"lb"},label),h("p",{class:"n m"},String(n),h("small",{}," 件"))));
-  const list=h("div",{}),count=h("p",{class:"sub",style:"margin-bottom:10px"});
+  const ro=!!view,P=ro?view.products:db.products,nRead=P.filter(isRead).length,nDocs=P.reduce((a,p)=>a+p.docs.length,0);
+  const stat=(bg,fg,ds,label,n,v)=>{
+    const body=[h("div",{class:"ic",style:`background:${bg};color:${fg}`},icon(ds)),h("div",{},h("p",{class:"lb"},label),h("p",{class:"n m"},String(n),h("small",{}," 件")))];
+    if(v===undefined)return h("div",{class:"k st"},body);
+    return h("button",{type:"button",class:"k st"+(fs===v?" on":""),"aria-pressed":String(fs===v),onclick:()=>{fs=v;sel.value=v;paint();sec.scrollIntoView({behavior:"smooth",block:"start"})}},body);
+  };
+  const cards=h("div",{class:"grid"}),list=h("div",{}),count=h("p",{class:"sub",style:"margin-bottom:10px"});
   const sel=h("select",{class:"f","aria-label":"状態"},h("option",{value:""},"状態:すべて"),h("option",{value:"未読"},"未読"),h("option",{value:"既読済み"},"既読済み"));
   sel.value=fs;sel.addEventListener("change",()=>{fs=sel.value;paint()});
   function paint(){
+    cards.textContent="";
+    cards.append(
+      stat("#e8eefb","#2f4fa8",["M3 4h18v5H3zM5 9v10h14V9M10 13h4"],ro?"配信製品":"登録製品",P.length,""),
+      stat("#def5ee","#0f766e",["M12 3a9 9 0 1 0 0 18a9 9 0 0 0 0-18zM8 12l3 3 5-6"],"既読済み",nRead,"既読済み"),
+      stat("#fdf0dc","#b45309",["M12 3a9 9 0 1 0 0 18a9 9 0 0 0 0-18zM12 7v5l3 2"],"未読",P.length-nRead,"未読"),
+      stat("#e8ebf2","#475569",["M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 14l2 2 4-4"],"保管資料",nDocs));
     const t=q.toLowerCase();
-    const items=P.filter(p=>(!fs||(fs==="既読済み")===isRead(p))&&(!t||[p.name,p.model].join("\n").toLowerCase().includes(t))).sort((a,b)=>b.updatedAt-a.updatedAt);
-    count.textContent=`${items.length}件の表示 / 全${P.length}件`;list.textContent="";
-    if(!items.length)list.append(h("p",{class:"sub",style:"text-align:center;padding:28px 0;border-top:1px solid var(--ln)"},P.length?"条件に一致する製品はありません":"まだ製品がありません。右下の「+」から追加してください"));
+    const items=P.filter(p=>(!fs||(fs==="既読済み")===isRead(p))&&(!t||[p.maker,p.name,p.model,p.category].join("\n").toLowerCase().includes(t))).sort((a,b)=>b.updatedAt-a.updatedAt);
+    count.textContent=`${fs||"すべて"} ・ ${items.length}件の表示 / 全${P.length}件`;list.textContent="";
+    if(!items.length)list.append(h("p",{class:"sub",style:"text-align:center;padding:28px 0;border-top:1px solid var(--ln)"},P.length?"条件に一致する製品はありません":ro?"配信された製品はありません":"まだ製品がありません。右下の「+」から追加してください"));
     for(const p of items)list.append(h("button",{class:"row",onclick:()=>detail(p.id)},
-      h("div",{},h("p",{style:"font-weight:700"},p.name),h("p",{class:"sub"},[p.model,`資料${p.docs.length}件`].filter(Boolean).join(" ・ "))),
+      h("div",{style:"min-width:0"},h("p",{style:"font-weight:700"},p.name),h("p",{class:"sub"},[p.maker,p.model,p.category,`資料${p.docs.length}件`].filter(Boolean).join(" ・ "))),
       h("span",{class:"tg "+(isRead(p)?"o":"a")},isRead(p)?"既読済み":"未読")));
   }
-  const search=h("input",{class:"f",type:"search",placeholder:"製品名・型番で検索","aria-label":"検索",value:q});
+  const search=h("input",{class:"f",type:"search",placeholder:"メーカー・製品名・型番・カテゴリで検索","aria-label":"検索",value:q});
   search.addEventListener("input",()=>{q=search.value;paint()});
+  const sec=h("section",{class:"k"},h("div",{style:"padding:14px"},h("h2",{style:"font-size:17px"},"製品一覧"),count,search,sel),list);
   const el=h("main",{},
-    h("div",{class:"bar"},h("button",{class:"g",onclick:backup},"バックアップ"),h("button",{class:"g",onclick:lock},"ロック")),
+    h("div",{class:"bar"},...(ro?[h("button",{class:"g",onclick:lock},"ロック")]:[h("button",{class:"g",onclick:shareSheet},"配信"),h("button",{class:"g",onclick:backup},"バックアップ"),h("button",{class:"g",onclick:lock},"ロック")])),
     h("p",{class:"eb m"},"INTERNAL ARCHIVE / 2026"),h("h1",{style:"font-size:32px;line-height:1.3"},"製品保管庫"),
-    h("p",{class:"sub"},"製品情報と関連資料を、一つの安全な場所で管理します。"),
-    h("div",{class:"grid"},
-      stat("#e8eefb","#2f4fa8",["M3 4h18v5H3zM5 9v10h14V9M10 13h4"],"登録製品",P.length),
-      stat("#def5ee","#0f766e",["M12 3a9 9 0 1 0 0 18a9 9 0 0 0 0-18zM8 12l3 3 5-6"],"既読済み",nRead),
-      stat("#fdf0dc","#b45309",["M12 3a9 9 0 1 0 0 18a9 9 0 0 0 0-18zM12 7v5l3 2"],"未読",P.length-nRead),
-      stat("#e8ebf2","#475569",["M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 14l2 2 4-4"],"保管資料",P.reduce((a,p)=>a+p.docs.length,0))),
-    h("section",{class:"k"},h("div",{style:"padding:14px"},h("h2",{style:"font-size:17px"},"製品一覧"),count,search,sel),list),
-    h("button",{class:"fab","aria-label":"製品を追加",onclick:()=>form(null)},"+"));
+    h("p",{class:"sub"},ro?`配信された製品と資料を閲覧できます(閲覧専用)。配信日: ${new Date(view.at).toLocaleDateString("ja-JP")}`:"製品情報と関連資料を、一つの安全な場所で管理します。"),
+    cards,sec,
+    h("p",{class:"sub",style:"text-align:center;margin-top:24px"},"バージョン 4"),
+    !ro&&h("button",{class:"fab","aria-label":"製品を追加",onclick:()=>form(null)},"+"));
   paint();return el;
 }
 
-// 資料を開く(開いた時点で既読済みにする)
+// 資料を表示(保存前のファイルも確認できる)
+function viewBlob(name,type,size,blob){
+  const url=URL.createObjectURL(blob),file=new File([blob],name,{type:blob.type});
+  sheet(name,()=>h("div",{},
+    type&&type.startsWith("image/")&&h("img",{src:url,alt:name,style:"width:100%;margin:12px 0;border-radius:4px"}),
+    h("p",{class:"sub",style:"margin:10px 0"},fmtSize(size)),
+    h("a",{class:"b",href:url,target:"_blank",rel:"noopener"},"別画面で開く"),
+    h("button",{class:"b o",style:"margin-top:8px",onclick:()=>{
+      if(navigator.canShare&&navigator.canShare({files:[file]}))navigator.share({files:[file],title:name}).catch(()=>{});
+      else toast("この端末では共有できません。「別画面で開く」を使ってください")}},"共有・保存")),
+    ()=>setTimeout(()=>URL.revokeObjectURL(url),60000));
+}
+// 保存済みの資料を開く(開いた時点で既読済みにする)
 async function openDoc(p,d,onRead){
-  let url;
   try{
-    const rec=await fGet(d.id);if(!rec)throw 0;
-    const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:rec.iv},key,rec.ct);
+    const rec=view?await sGet("file:"+d.id):await fGet(d.id);if(!rec)throw 0;
+    const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:rec.iv},view?view.cek:key,rec.ct);
     const blob=new Blob([pt],{type:d.type||"application/octet-stream"});
-    url=URL.createObjectURL(blob);
-    const file=new File([blob],d.name,{type:blob.type});
-    if(!p.readAt){p.readAt=Date.now();await persist();render();onRead&&onRead()}
-    sheet(d.name,()=>h("div",{},
-      d.type&&d.type.startsWith("image/")&&h("img",{src:url,alt:d.name,style:"width:100%;margin:12px 0;border-radius:4px"}),
-      h("p",{class:"sub",style:"margin:10px 0"},fmtSize(d.size)),
-      h("a",{class:"b",href:url,target:"_blank",rel:"noopener"},"別画面で開く"),
-      h("button",{class:"b o",style:"margin-top:8px",onclick:()=>{
-        if(navigator.canShare&&navigator.canShare({files:[file]}))navigator.share({files:[file],title:d.name}).catch(()=>{});
-        else toast("この端末では共有できません。「別画面で開く」を使ってください")}},"共有・保存")),
-      ()=>setTimeout(()=>URL.revokeObjectURL(url),60000));
+    if(!isRead(p)){await markRead(p);render();onRead&&onRead()}
+    viewBlob(d.name,d.type,d.size,blob);
   }catch{toast("資料を開けませんでした")}
 }
 
 function detail(id){
-  const p=db.products.find(x=>x.id===id);if(!p)return;
-  const tag=h("span",{class:"tg",style:"margin:0"});
-  const hint=h("p",{class:"sub",style:"margin-top:4px"}),rl=h("p",{class:"sub",style:"margin:10px 0"});
-  const upd=()=>{tag.textContent=isRead(p)?"既読済み":"未読";tag.className="tg "+(isRead(p)?"o":"a");hint.textContent="資料"+(isRead(p)?"":"(開くと既読済みになります)");rl.textContent=isRead(p)?"既読: "+new Date(p.readAt).toLocaleString("ja-JP",{dateStyle:"short",timeStyle:"short"}):""};upd();
+  const p=(view?view.products:db.products).find(x=>x.id===id);if(!p)return;
+  const tag=h("span",{class:"tg",style:"margin:0"}),hint=h("p",{class:"sub",style:"margin-top:4px"}),rl=h("p",{class:"sub",style:"margin:10px 0"});
+  const upd=()=>{const rt=view?vread[p.id]:p.readAt;tag.textContent=isRead(p)?"既読済み":"未読";tag.className="tg "+(isRead(p)?"o":"a");hint.textContent="資料"+(isRead(p)?"":"(開くと既読済みになります)");rl.textContent=isRead(p)?"既読: "+new Date(rt).toLocaleString("ja-JP",{dateStyle:"short",timeStyle:"short"}):""};upd();
+  const fd=(l,v)=>v?h("div",{class:"fd"},h("p",{class:"sub"},l),h("p",{},v)):null;
   sheet(p.name,close=>h("div",{},
     h("div",{style:"margin:8px 0"},tag),
-    p.model&&h("div",{class:"fd"},h("p",{class:"sub"},"型番"),h("p",{},p.model)),
+    fd("メーカー名",p.maker),fd("型番",p.model),fd("カテゴリ",p.category),
     hint,
     ...(p.docs.length?p.docs.map(d=>h("button",{class:"row",onclick:()=>openDoc(p,d,upd)},
-      h("div",{style:"min-width:0"},h("p",{style:"font-weight:700;word-break:break-all"},d.name),h("p",{class:"sub"},fmtSize(d.size))),h("span",{class:"tg i"},"開く"))):[h("p",{class:"sub",style:"padding:12px 0"},"資料はまだありません。「編集」から追加できます")]),
+      h("div",{style:"min-width:0"},h("p",{style:"font-weight:700;word-break:break-all"},d.name),h("p",{class:"sub"},fmtSize(d.size))),h("span",{class:"tg i"},"開く"))):[h("p",{class:"sub",style:"padding:12px 0"},view?"資料はありません":"資料はまだありません。「編集」から追加できます")]),
     rl,
-    h("button",{class:"b",style:"margin-top:12px",onclick:()=>{close();form(p)}},"編集"),
-    h("button",{class:"b d",style:"margin-top:8px",onclick:async()=>{
+    !view&&h("button",{class:"b",style:"margin-top:12px",onclick:()=>{close();form(p)}},"編集"),
+    !view&&h("button",{class:"b d",style:"margin-top:8px",onclick:async()=>{
       if(!confirm("この製品と資料を削除しますか?(元に戻せません)"))return;
       try{for(const d of p.docs)await fDel(d.id)}catch{}
       db.products=db.products.filter(x=>x!==p);await persist();close();render()}},"削除")));
@@ -196,16 +212,19 @@ function detail(id){
 
 function form(p){
   const saved=p?[...p.docs]:[],removed=[];let pending=[];
-  const name=h("input",{class:"f",maxlength:"100",required:true}),model=h("input",{class:"f",maxlength:"60"});
-  name.value=p?p.name:"";model.value=p?p.model||"":"";
+  const inp=(max,val,list)=>{const e=h("input",{class:"f",maxlength:max,list});e.value=val||"";return e};
+  const maker=inp("60",p&&p.maker,"mk-list"),name=inp("100",p&&p.name),model=inp("60",p&&p.model),cat=inp("40",p&&p.category,"cg-list");
+  name.required=true;
+  const uniq=k=>[...new Set(db.products.map(x=>x[k]).filter(Boolean))].map(v=>h("option",{value:v}));
   const input=h("input",{type:"file",multiple:true,style:"display:none"}),fl=h("div",{style:"margin-bottom:12px"});
   const row=(f,btns)=>h("div",{class:"rw fi"},h("div",{style:"min-width:0"},h("p",{style:"word-break:break-all"},f.name),h("p",{class:"sub"},fmtSize(f.size))),h("span",{style:"white-space:nowrap"},btns));
   function paintF(){
     fl.textContent="";
     for(const d of saved)fl.append(row(d,[p&&h("button",{type:"button",class:"g",onclick:()=>openDoc(p,d)},"開く"),h("button",{type:"button",class:"g d",onclick:()=>{saved.splice(saved.indexOf(d),1);removed.push(d.id);paintF()}},"削除")]));
-    for(const f of pending)fl.append(row(f,[h("button",{type:"button",class:"g d",onclick:()=>{pending=pending.filter(x=>x!==f);paintF()}},"削除")]));
+    for(const f of pending)fl.append(row(f,[h("button",{type:"button",class:"g",onclick:()=>viewBlob(f.name,f.type,f.size,f)},"開く"),h("button",{type:"button",class:"g d",onclick:()=>{pending=pending.filter(x=>x!==f);paintF()}},"削除")]));
   }
   input.addEventListener("change",()=>{for(const f of input.files){if(f.size>MAXF){toast(`「${f.name}」は20MBを超えるため追加できません`);continue}pending.push(f)}input.value="";paintF()});
+  paintF();
   const btn=h("button",{class:"b",type:"submit"},"保存");
   sheet(p?"製品を編集":"製品を登録",close=>h("form",{onsubmit:async e=>{
     e.preventDefault();btn.disabled=true;btn.textContent="保存中…";
@@ -213,12 +232,110 @@ function form(p){
       const now=Date.now(),o=p||{id:crypto.randomUUID(),createdAt:now,docs:[]},docs=[...saved];
       for(const f of pending){const{iv,ct}=await encFile(f),id=crypto.randomUUID();await fPut(id,{iv,ct});docs.push({id,name:f.name,type:f.type||"",size:f.size,at:now})}
       for(const id of removed)await fDel(id);
-      Object.assign(o,{name:name.value.trim(),model:model.value.trim(),docs,updatedAt:now});
+      Object.assign(o,{maker:maker.value.trim(),name:name.value.trim(),model:model.value.trim(),category:cat.value.trim(),docs,updatedAt:now});
       if(!p)db.products.push(o);
       await persist();close();render();
     }catch{toast("保存に失敗しました(端末の保存容量を確認してください)");btn.disabled=false;btn.textContent="保存"}
-  }},h("div",{style:"height:8px"}),h("label",{},"製品名(必須)"),name,h("label",{},"型番"),model,
+  }},h("div",{style:"height:8px"}),
+    h("datalist",{id:"mk-list"},uniq("maker")),h("datalist",{id:"cg-list"},uniq("category")),
+    h("label",{},"メーカー名"),maker,h("label",{},"製品名(必須)"),name,h("label",{},"型番"),model,h("label",{},"カテゴリ"),cat,
     h("label",{},"資料"),fl,input,h("button",{type:"button",class:"b o",style:"margin:0 0 16px",onclick:()=>input.click()},"資料をアップロード"),btn));
+}
+
+// ===== 配信(閲覧専用アカウント) =====
+const genCode=()=>{const A="ABCDEFGHJKLMNPQRSTUVWXYZ23456789",r=crypto.getRandomValues(new Uint8Array(10));let t="";for(const x of r)t+=A[x%32];return t.slice(0,5)+"-"+t.slice(5)};
+const normCode=t=>String(t||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+function ensureAccounts(){if(Array.isArray(db.accounts)&&db.accounts.length===15)return false;db.accounts=Array.from({length:15},(_,i)=>({id:"viewer"+String(i+1).padStart(2,"0"),label:"",code:genCode(),on:false}));return true}
+const SH_IT=200000;
+async function wrapKey(code,raw){const sl=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12)),k=await derive(code,sl,SH_IT);return{s:b64(sl),i:b64(iv),c:b64(new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv},k,raw)))}}
+async function unwrapKey(code,e){const k=await derive(code,ub64(e.s),SH_IT),raw=await crypto.subtle.decrypt({name:"AES-GCM",iv:ub64(e.i)},k,ub64(e.c));return crypto.subtle.importKey("raw",raw,"AES-GCM",false,["encrypt","decrypt"])}
+async function buildShare(ids,accs,prog){
+  const cek=await crypto.subtle.generateKey({name:"AES-GCM",length:256},true,["encrypt","decrypt"]),raw=await crypto.subtle.exportKey("raw",cek);
+  const prods=db.products.filter(p=>ids.has(p.id)),files=[];
+  for(const p of prods)for(const d of p.docs){
+    const r=await fGet(d.id);if(!r)continue;
+    const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:r.iv},key,r.ct),iv=crypto.getRandomValues(new Uint8Array(12));
+    files.push({id:d.id,i:b64(iv),c:b64(new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv},cek,pt)))});
+  }
+  const at=Date.now(),meta={at,products:prods.map(p=>({id:p.id,maker:p.maker||"",name:p.name,model:p.model||"",category:p.category||"",updatedAt:p.updatedAt,docs:p.docs.map(d=>({id:d.id,name:d.name,type:d.type,size:d.size}))}))};
+  const miv=crypto.getRandomValues(new Uint8Array(12)),mct=new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv:miv},cek,enc.encode(JSON.stringify(meta))));
+  const keys=[];let n=0;
+  for(const a of accs){keys.push({id:a.id,...await wrapKey(normCode(a.code),new Uint8Array(raw))});prog(++n)}
+  return JSON.stringify({v:3,kind:"pv-share",id:crypto.randomUUID(),at,keys,meta:{i:b64(miv),c:b64(mct)},files});
+}
+async function importShare(text){
+  const o=JSON.parse(text);if(o.kind!=="pv-share"||o.v!==3||!Array.isArray(o.keys))throw 0;
+  await sClear();await sPut("pkg",{id:o.id,at:o.at,keys:o.keys,meta:o.meta});
+  for(const f of o.files||[])await sPut("file:"+f.id,{iv:ub64(f.i),ct:ub64(f.c).buffer});
+  try{localStorage.setItem("pv_hasshare","1")}catch{}
+}
+async function viewerLogin(id,code){
+  const pkg=await sGet("pkg"),e=pkg&&pkg.keys.find(k=>k.id===String(id).trim().toLowerCase());if(!e)throw 0;
+  const cek=await unwrapKey(normCode(code),e),pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:ub64(pkg.meta.i)},cek,ub64(pkg.meta.c)),m=JSON.parse(dec.decode(pt));
+  let vr={};try{vr=JSON.parse(localStorage.getItem("pv_vread")||"{}")}catch{}
+  vread=vr;view={cek,products:m.products,at:m.at};
+}
+function viewerLock(){
+  let has=false;try{has=!!localStorage.getItem("pv_hasshare")}catch{}
+  const file=h("input",{class:"f",type:"file",accept:".json,application/json"});
+  const idIn=h("input",{class:"f",autocapitalize:"none",autocomplete:"username",placeholder:"アカウントID(例: viewer01)",required:true});
+  const pw=h("input",{class:"f",type:"password",autocomplete:"current-password",placeholder:"パスコード(例: ABCDE-FGHJK)",required:true});
+  const err=h("p",{class:"err",role:"alert"}),btn=h("button",{class:"b",type:"submit"},"ログイン");
+  const f=h("form",{class:"k lk",onsubmit:async e=>{
+    e.preventDefault();err.textContent="";btn.disabled=true;
+    try{
+      if(file.files[0]){try{await importShare(await file.files[0].text())}catch{err.textContent="配信ファイルを読み込めませんでした";return}}
+      else if(!has){err.textContent="配信ファイルを選んでください";return}
+      try{await viewerLogin(idIn.value,pw.value);fails=0}
+      catch{fails++;const w=Math.min(30,2**fails);pw.value="";err.textContent=`IDまたはパスコードが違います(${w}秒お待ちください)`;await sleep(w*1000);err.textContent="IDまたはパスコードが違います";return}
+      arm();render();
+    }finally{btn.disabled=false}
+  }},h("p",{class:"eb m"},"INTERNAL ARCHIVE"),h("h1",{style:"font-size:24px;margin:2px 0 4px"},"閲覧者ログイン"),
+    h("p",{class:"sub",style:"margin-bottom:14px"},"配信された製品と資料を閲覧できます(閲覧専用)。"),
+    h("label",{},"配信ファイル"),h("p",{class:"sub",style:"margin:2px 0"},has?"新しい配信ファイルを受け取ったときだけ選んでください":"最初に、受け取った配信ファイルを選んでください"),file,
+    h("label",{},"アカウントID"),idIn,h("label",{},"パスコード"),pw,err,btn);
+  return h("main",{class:"ctr"},h("div",{style:"width:100%;max-width:380px"},f,h("button",{class:"g",style:"width:100%;margin-top:8px",onclick:()=>{who="owner";render()}},"管理者として開く")));
+}
+function shareSheet(){
+  if(ensureAccounts())persist();
+  const ids=new Set(db.products.map(x=>x.id)),out=h("div",{}),addr=location.origin+location.pathname;
+  const note=(t,b)=>h("p",{class:"sub",style:b?"font-weight:700;margin:16px 0 4px":"margin:4px 0"},t);
+  const prodList=h("div",{});
+  for(const p of db.products){const cb=h("input",{type:"checkbox",checked:true});cb.addEventListener("change",()=>cb.checked?ids.add(p.id):ids.delete(p.id));prodList.append(h("label",{class:"ck"},cb,h("span",{},p.name+(p.model?`(${p.model})`:""))))}
+  if(!db.products.length)prodList.append(note("製品がまだありません"));
+  const accList=h("div",{});
+  for(const a of db.accounts){
+    const lab=h("input",{class:"f",maxlength:"30",placeholder:"メモ(例: 田中さん)",style:"margin:6px 0"});lab.value=a.label||"";lab.addEventListener("change",()=>{a.label=lab.value.trim();persist()});
+    const on=h("input",{type:"checkbox"});on.checked=!!a.on;on.addEventListener("change",()=>{a.on=on.checked;persist()});
+    const codeEl=h("span",{class:"m",style:"font-weight:700"},a.code);
+    accList.append(h("div",{class:"k card"},
+      h("div",{class:"rw"},h("strong",{},a.id),h("label",{class:"ck",style:"min-height:36px"},on,h("span",{},"配信する"))),lab,
+      h("div",{class:"rw"},h("div",{},h("p",{class:"sub"},"パスコード"),codeEl),
+        h("span",{style:"white-space:nowrap"},
+          h("button",{class:"g",onclick:async()=>{try{await navigator.clipboard.writeText(`アカウントID: ${a.id}\nパスコード: ${a.code}\nアドレス: ${addr}`);toast("コピーしました",true)}catch{toast("コピーできませんでした")}}},"コピー"),
+          h("button",{class:"g d",onclick:()=>{if(!confirm(`${a.id} のパスコードを再発行しますか?\n(すでに送ったファイルは、古いパスコードで開けます)`))return;a.code=genCode();codeEl.textContent=a.code;persist()}},"再発行")))));
+  }
+  const mk=h("button",{class:"b",onclick:async()=>{
+    const accs=db.accounts.filter(a=>a.on);
+    if(!ids.size)return toast("配信する製品を選んでください");
+    if(!accs.length)return toast("「配信する」にするアカウントを選んでください");
+    mk.disabled=true;out.textContent="";mk.textContent="作成中…";
+    try{
+      const text=await buildShare(ids,accs,n=>{mk.textContent=`作成中… ${n}/${accs.length}`});
+      const name=`製品配信-${new Date().toISOString().slice(0,10)}.json`,f=new File([text],name,{type:"application/json"}),url=URL.createObjectURL(f);
+      out.append(h("p",{class:"sub",style:"margin:8px 0"},`${name}(${fmtSize(f.size)})を作成しました。製品${ids.size}件・アカウント${accs.length}人分`),
+        h("button",{class:"b",onclick:()=>{if(navigator.canShare&&navigator.canShare({files:[f]}))navigator.share({files:[f]}).catch(()=>{});else toast("共有できません。下の「ダウンロード」を使ってください")}},"保存・共有"),
+        h("a",{class:"b o",href:url,download:name},"ダウンロード"));
+    }catch{toast("配信ファイルの作成に失敗しました")}
+    mk.disabled=false;mk.textContent="配信ファイルを作成";
+  }},"配信ファイルを作成");
+  sheet("配信(閲覧専用アカウント)",()=>h("div",{},
+    note("選んだ製品と資料を、「配信する」にしたアカウントの人だけが、パスコードで開いて閲覧できます(閲覧のみ・編集不可)。"),
+    note("1. 配信する製品",true),prodList,
+    note("2. アカウント(15人分)",true),
+    note("配信したい人のアカウントだけ「配信する」をオンにして、IDとパスコードを「コピー」して渡します。配信ファイルとは別の方法で渡すと安全です。"),accList,
+    note("3. 配信ファイルを作る",true),
+    note("相手には、アプリのアドレスと配信ファイルを送ります。内容を更新したら、作り直して送り直してください。すでに送ったファイルは取り消せません。"),mk,out));
 }
 
 function backup(){
