@@ -5,11 +5,11 @@
 <meta name="theme-color" content="#1a2340">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="製品保管庫">
+<meta name="apple-mobile-web-app-title" content="簡易企画書アプリ">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" href="icon-192.png" type="image/png">
-<title>製品保管庫</title>
+<title>簡易企画書アプリ</title>
 <style>
 :root{--bg:#f5f6fa;--card:#fff;--tx:#1a2340;--sub:#5b6477;--ln:#dde2ee;--ac:#2f4fa8;--acx:#fff;--dg:#b42828;--in:#f5f6fa;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#11141b;--card:#1a1f29;--tx:#e8eaf0;--sub:#a0a8b8;--ln:#2b3140;--ac:#8aa4ff;--acx:#0b1020;--dg:#ff8080;--in:#11141b}}
@@ -126,7 +126,7 @@ function lockView(){
     }catch(x){err.textContent="処理に失敗しました(この環境では暗号化機能が使えない可能性があります)"}
     finally{btn.disabled=false}
   }},
-    h("p",{class:"eb m"},"INTERNAL ARCHIVE"),h("h1",{style:"font-size:24px;margin:2px 0 4px"},"製品保管庫"),
+    h("p",{class:"eb m"},"INTERNAL ARCHIVE"),h("h1",{style:"font-size:24px;margin:2px 0 4px"},"簡易企画書アプリ"),
     h("p",{class:"sub",style:"margin-bottom:14px"},first?"最初にパスコードを設定します。データはこの端末のブラウザ内で暗号化して保存され、パスコードを忘れると復元できません。":"パスコードを入力してください"),
     p1,p2,err,btn);
   return h("main",{class:"ctr"},h("div",{style:"width:100%;max-width:380px"},f,h("button",{class:"g",style:"width:100%;margin-top:8px",onclick:()=>{who="viewer";render()}},"閲覧者として開く(配信を受け取った方)")));
@@ -162,10 +162,10 @@ function home(){
   const sec=h("section",{class:"k"},h("div",{style:"padding:14px"},h("h2",{style:"font-size:17px"},"製品一覧"),count,search,sel),list);
   const el=h("main",{},
     h("div",{class:"bar"},...(ro?[h("button",{class:"g",onclick:lock},"ロック")]:[h("button",{class:"g",onclick:shareSheet},"配信"),h("button",{class:"g",onclick:backup},"バックアップ"),h("button",{class:"g",onclick:lock},"ロック")])),
-    h("p",{class:"eb m"},"INTERNAL ARCHIVE / 2026"),h("h1",{style:"font-size:32px;line-height:1.3"},"製品保管庫"),
+    h("p",{class:"eb m"},"INTERNAL ARCHIVE / 2026"),h("h1",{style:"font-size:32px;line-height:1.3"},"簡易企画書アプリ"),
     h("p",{class:"sub"},ro?`配信された製品と資料を閲覧できます(閲覧専用)。配信日: ${new Date(view.at).toLocaleDateString("ja-JP")}`:"製品情報と関連資料を、一つの安全な場所で管理します。"),
     cards,sec,
-    h("p",{class:"sub",style:"text-align:center;margin-top:24px"},"バージョン 8"),
+    h("p",{class:"sub",style:"text-align:center;margin-top:24px"},"バージョン 9"),
     !ro&&h("button",{class:"fab","aria-label":"製品を追加",onclick:()=>form(null)},"+"));
   paint();return el;
 }
@@ -385,7 +385,7 @@ function backup(){
       const files=[];
       for(const p of db.products)for(const d of p.docs){const r=await fGet(d.id);if(r)files.push({id:d.id,i:b64(r.iv),c:b64(new Uint8Array(r.ct))})}
       const text=JSON.stringify({v:2,meta:await seal(),files});
-      const name=`製品保管庫-${new Date().toISOString().slice(0,10)}.json`;
+      const name=`簡易企画書アプリ-${new Date().toISOString().slice(0,10)}.json`;
       ready=new File([text],name,{type:"application/json"});
       const url=URL.createObjectURL(ready);
       out.append(h("p",{class:"sub",style:"margin:8px 0"},`${name}(${fmtSize(ready.size)})を作成しました`),
