@@ -104,7 +104,7 @@ async function markRead(p){if(view){vread[p.id]=Date.now();try{localStorage.setI
 const LOCK_MS=300000;let lastAct=Date.now();
 function arm(){if(armed)return;armed=true;const bump=()=>{lastAct=Date.now();if(db||view){clearTimeout(idle);idle=setTimeout(lock,LOCK_MS)}};["click","keydown","touchstart"].forEach(e=>document.addEventListener(e,bump,{passive:true}));document.addEventListener("visibilitychange",()=>{if(!document.hidden&&(db||view)&&Date.now()-lastAct>=LOCK_MS)lock()});bump()}
 function lock(){db=null;key=null;salt=null;view=null;document.querySelectorAll(".ov").forEach(o=>o.remove());render()}
-function render(){root.textContent="";root.append(db||view?home():who==="viewer"?viewerLock():lockView())}
+function render(){const y=window.scrollY;root.textContent="";root.append(db||view?home():who==="viewer"?viewerLock():lockView());window.scrollTo(0,y)}
 
 function lockView(){
   const blob=rd(),first=!blob;
@@ -165,7 +165,7 @@ function home(){
     h("p",{class:"eb m"},"INTERNAL ARCHIVE / 2026"),h("h1",{style:"font-size:32px;line-height:1.3"},"製品保管庫"),
     h("p",{class:"sub"},ro?`配信された製品と資料を閲覧できます(閲覧専用)。配信日: ${new Date(view.at).toLocaleDateString("ja-JP")}`:"製品情報と関連資料を、一つの安全な場所で管理します。"),
     cards,sec,
-    h("p",{class:"sub",style:"text-align:center;margin-top:24px"},"バージョン 7"),
+    h("p",{class:"sub",style:"text-align:center;margin-top:24px"},"バージョン 8"),
     !ro&&h("button",{class:"fab","aria-label":"製品を追加",onclick:()=>form(null)},"+"));
   paint();return el;
 }
@@ -196,7 +196,7 @@ async function openDoc(p,d,onRead){
 function detail(id){
   const p=(view?view.products:db.products).find(x=>x.id===id);if(!p)return;
   const tag=h("span",{class:"tg",style:"margin:0"}),hint=h("p",{class:"sub",style:"margin-top:4px"}),rl=h("p",{class:"sub",style:"margin:10px 0"});
-  const upd=()=>{const rt=view?vread[p.id]:p.readAt;tag.textContent=isRead(p)?"既読済み":"未読";tag.className="tg "+(isRead(p)?"o":"a");hint.textContent="資料"+(isRead(p)?"":"(開くと既読済みになります)");rl.textContent=isRead(p)?"既読: "+new Date(rt).toLocaleString("ja-JP",{dateStyle:"short",timeStyle:"short"}):""};upd();
+  const upd=()=>{const rt=view?vread[p.id]:p.readAt;tag.textContent=isRead(p)?"既読済み":"未読";tag.className="tg "+(isRead(p)?"o":"a");hint.textContent="資料";rl.textContent=isRead(p)?"既読: "+new Date(rt).toLocaleString("ja-JP",{dateStyle:"short",timeStyle:"short"}):""};let changed=false;if(!isRead(p)){markRead(p);changed=true}upd();
   const fd=(l,v)=>v?h("div",{class:"fd"},h("p",{class:"sub"},l),h("p",{},v)):null;
   sheet(p.name,close=>h("div",{},
     h("div",{style:"margin:8px 0"},tag),
@@ -209,7 +209,7 @@ function detail(id){
     !view&&h("button",{class:"b d",style:"margin-top:8px",onclick:async()=>{
       if(!confirm("この製品と資料を削除しますか?(元に戻せません)"))return;
       try{for(const d of p.docs)await fDel(d.id)}catch{}
-      db.products=db.products.filter(x=>x!==p);await persist();close();render()}},"削除")));
+      db.products=db.products.filter(x=>x!==p);await persist();close();render()}},"削除")),()=>{if(changed)render()});
 }
 
 function form(p){
