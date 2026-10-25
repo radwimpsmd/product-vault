@@ -165,7 +165,7 @@ function home(){
     h("p",{class:"eb m"},"INTERNAL ARCHIVE / 2026"),h("h1",{style:"font-size:32px;line-height:1.3"},"製品保管庫"),
     h("p",{class:"sub"},ro?`配信された製品と資料を閲覧できます(閲覧専用)。配信日: ${new Date(view.at).toLocaleDateString("ja-JP")}`:"製品情報と関連資料を、一つの安全な場所で管理します。"),
     cards,sec,
-    h("p",{class:"sub",style:"text-align:center;margin-top:24px"},"バージョン 6"),
+    h("p",{class:"sub",style:"text-align:center;margin-top:24px"},"バージョン 7"),
     !ro&&h("button",{class:"fab","aria-label":"製品を追加",onclick:()=>form(null)},"+"));
   paint();return el;
 }
@@ -231,7 +231,7 @@ function form(p){
   sheet(p?"製品を編集":"製品を登録",close=>h("form",{onsubmit:async e=>{
     e.preventDefault();btn.disabled=true;btn.textContent="保存中…";
     try{
-      const now=Date.now(),o=p||{id:crypto.randomUUID(),createdAt:now,docs:[]},docs=[...saved];
+      const now=Date.now(),o=p||{id:crypto.randomUUID(),createdAt:now,docs:[],share:false},docs=[...saved];
       for(const f of pending){const{iv,ct}=await encFile(f),id=crypto.randomUUID();await fPut(id,{iv,ct});docs.push({id,name:f.name,type:f.type||"",size:f.size,at:now})}
       for(const id of removed)await fDel(id);
       Object.assign(o,{maker:maker.value.trim(),name:name.value.trim(),model:model.value.trim(),category:cat.value.trim(),docs,updatedAt:now});
@@ -323,10 +323,20 @@ function viewerLock(){
 }
 function shareSheet(){
   if(ensureAccounts())persist();
-  const ids=new Set(db.products.map(x=>x.id)),out=h("div",{}),addr=location.origin+location.pathname;
+  const ids=new Set(db.products.filter(x=>x.share!==false).map(x=>x.id)),out=h("div",{}),addr=location.origin+location.pathname;
   const note=(t,b)=>h("p",{class:"sub",style:b?"font-weight:700;margin:16px 0 4px":"margin:4px 0"},t);
   const prodList=h("div",{});
-  for(const p of db.products){const cb=h("input",{type:"checkbox",checked:true});cb.addEventListener("change",()=>cb.checked?ids.add(p.id):ids.delete(p.id));prodList.append(h("label",{class:"ck"},cb,h("span",{},p.name+(p.model?`(${p.model})`:""))))}
+  const cbs=[],szEl=h("p",{class:"sub",style:"margin:8px 0;font-weight:700"});
+  const updSize=()=>{const sl=db.products.filter(x=>ids.has(x.id)),sum=sl.reduce((a,x)=>a+x.docs.reduce((n,d)=>n+d.size,0),0),est=Math.round(sum*1.34)+51200;szEl.textContent=`配信ファイルの見込み: 約${fmtSize(est)} / GitHubの上限 約25MB(選択${sl.length}件)`;szEl.style.color=est>24*1024*1024?"var(--dg)":""};
+  for(const p of db.products){
+    const cb=h("input",{type:"checkbox"});cb.checked=ids.has(p.id);cbs.push([p,cb]);
+    cb.addEventListener("change",()=>{cb.checked?ids.add(p.id):ids.delete(p.id);p.share=cb.checked;persist();updSize()});
+    const sz=p.docs.reduce((n,d)=>n+d.size,0);
+    prodList.append(h("label",{class:"ck"},cb,h("span",{style:"min-width:0"},p.name+(p.model?`(${p.model})`:""),h("br"),h("small",{class:"sub"},`資料${p.docs.length}件 ・ ${fmtSize(sz)}`))));
+  }
+  const setAll=v=>{for(const[p,cb]of cbs){cb.checked=v;v?ids.add(p.id):ids.delete(p.id);p.share=v}persist();updSize()};
+  const bulk=h("div",{style:"display:flex;gap:8px"},h("button",{class:"g",onclick:()=>setAll(true)},"すべて選択"),h("button",{class:"g",onclick:()=>setAll(false)},"すべて解除"));
+  updSize();
   if(!db.products.length)prodList.append(note("製品がまだありません"));
   const accList=h("div",{});
   for(const a of db.accounts){
@@ -359,7 +369,7 @@ function shareSheet(){
   }},"配信ファイルを作成");
   sheet("配信(閲覧専用アカウント)",()=>h("div",{},
     note("選んだ製品と資料を、「配信する」にしたアカウントの人だけが、パスコードで開いて閲覧できます(閲覧のみ・編集不可)。"),
-    note("1. 配信する製品",true),prodList,
+    note("1. 配信する製品",true),note("チェックは記憶されます。新しく登録した製品は、最初はチェックなし(配信されません)です。"),bulk,prodList,szEl,
     note("2. アカウント(15人分)",true),
     note("配信したい人のアカウントだけ「配信する」をオンにして、アドレス・ID・パスコードを「コピー」して本人に渡します(最初の1回だけ)。"),accList,
     note("3. 配信ファイルを作って公開する",true),
